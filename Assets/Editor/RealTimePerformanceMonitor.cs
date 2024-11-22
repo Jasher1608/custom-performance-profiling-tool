@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine.Profiling;
 using System.IO;
+using System;
+using System.Linq;
 
 public class RealTimePerformanceMonitor : EditorWindow
 {
@@ -16,6 +18,8 @@ public class RealTimePerformanceMonitor : EditorWindow
     private List<float> gpuTimeSamples = new List<float>();
     private List<float> drawCallsSamples = new List<float>();
     private List<float> memoryUsageSamples = new List<float>();
+
+    private List<PerformanceSample> performanceSamples = new List<PerformanceSample>();
 
     private float updateInterval = 0.5f;
     private double lastUpdateTime;
@@ -57,6 +61,12 @@ public class RealTimePerformanceMonitor : EditorWindow
     private bool logToConsole = true;
     private bool logToFile = false;
     private string logFilePath = "Logs/PerformanceLog.txt";
+
+    // Reporting settings
+    private bool enableReportGeneration = false;
+    private float reportInterval = 60f; // Generate report every 60 seconds
+    private double lastReportTime = 0;
+    private string reportFilePath = "Reports/PerformanceReport.csv";
 
     [MenuItem("Window/Real-Time Performance Monitor")]
     public static void ShowWindow()
@@ -109,6 +119,24 @@ public class RealTimePerformanceMonitor : EditorWindow
             if (EditorApplication.timeSinceStartup - lastUpdateTime > updateInterval)
             {
                 lastUpdateTime = EditorApplication.timeSinceStartup;
+
+                var sample = new PerformanceSample
+                {
+                    Timestamp = DateTime.Now,
+                    FPS = showFPS ? (1.0f / Time.deltaTime) : 0f,
+                    CPUTime = showCPUTime && cpuTimeRecorder.Valid ? cpuTimeRecorder.LastValue * 1e-6f : 0f,
+                    GPUTime = showGPUTime && gpuTimeRecorder.Valid ? gpuTimeRecorder.LastValue * 1e-5f : 0f,
+                    DrawCalls = showDrawCalls && drawCallsRecorder.Valid ? drawCallsRecorder.LastValue : 0f,
+                    MemoryUsage = showMemoryUsage ? UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / (1024f * 1024f) : 0f
+                };
+
+                performanceSamples.Add(sample);
+
+                // Trim samples if necessary to limit memory usage
+                if (performanceSamples.Count > maxSamples)
+                {
+                    performanceSamples.RemoveAt(0);
+                }
 
                 // Collect FPS data
                 if (showFPS)
@@ -174,6 +202,12 @@ public class RealTimePerformanceMonitor : EditorWindow
                 // Check thresholds and log if necessary
                 CheckThresholdsAndLog();
             }
+        }
+
+        if (enableReportGeneration && EditorApplication.timeSinceStartup - lastReportTime > reportInterval)
+        {
+            lastReportTime = EditorApplication.timeSinceStartup;
+            GeneratePerformanceReport();
         }
     }
 
@@ -263,6 +297,21 @@ public class RealTimePerformanceMonitor : EditorWindow
                     logFilePath = EditorGUILayout.TextField("Log File Path", logFilePath);
                 }
                 EditorGUI.indentLevel--;
+            }
+
+            // Reporting Settings
+            enableReportGeneration = EditorGUILayout.Toggle("Enable Report Generation", enableReportGeneration);
+            if (enableReportGeneration)
+            {
+                EditorGUI.indentLevel++;
+                reportInterval = EditorGUILayout.FloatField("Report Interval (s)", reportInterval);
+                reportFilePath = EditorGUILayout.TextField("Report File Path", reportFilePath);
+                EditorGUI.indentLevel--;
+            }
+
+            if (GUILayout.Button("Generate Performance Report Now"))
+            {
+                GeneratePerformanceReport();
             }
 
             // Profiler Integration
@@ -502,6 +551,10 @@ public class RealTimePerformanceMonitor : EditorWindow
         EditorPrefs.SetBool("RTPM_LogToConsole", logToConsole);
         EditorPrefs.SetBool("RTPM_LogToFile", logToFile);
         EditorPrefs.SetString("RTPM_LogFilePath", logFilePath);
+
+        EditorPrefs.SetBool("RTPM_EnableReportGeneration", enableReportGeneration);
+        EditorPrefs.SetFloat("RTPM_ReportInterval", reportInterval);
+        EditorPrefs.SetString("RTPM_ReportFilePath", reportFilePath);
     }
 
     private void LoadDebugSettings()
@@ -517,5 +570,103 @@ public class RealTimePerformanceMonitor : EditorWindow
         logToConsole = EditorPrefs.GetBool("RTPM_LogToConsole", true);
         logToFile = EditorPrefs.GetBool("RTPM_LogToFile", false);
         logFilePath = EditorPrefs.GetString("RTPM_LogFilePath", "Logs/PerformanceLog.txt");
+
+        enableReportGeneration = EditorPrefs.GetBool("RTPM_EnableReportGeneration", false);
+        reportInterval = EditorPrefs.GetFloat("RTPM_ReportInterval", 60f);
+        reportFilePath = EditorPrefs.GetString("RTPM_ReportFilePath", "Reports/PerformanceReport.csv");
+    }
+
+    private void GeneratePerformanceReport()
+    {
+        if (performanceSamples.Count == 0)
+        {
+            Debug.Log("No performance data to report.");
+            return;
+        }
+
+        string fullPath = Path.Combine(Application.dataPath, reportFilePath);
+        try
+        {
+            using (StreamWriter writer = new StreamWriter(fullPath, true))
+            {
+                // Write headers if file is new
+                if (new FileInfo(fullPath).Length == 0)
+                {
+                    writer.WriteLine("Timestamp,FPS,CPU Time (ms),GPU Time (ms),Draw Calls,Memory Usage (MB)");
+                }
+
+                // Write raw data
+                foreach (var sample in performanceSamples)
+                {
+                    string line = $"{sample.Timestamp},{sample.FPS:F2},{sample.CPUTime:F2},{sample.GPUTime:F2},{sample.DrawCalls:F0},{sample.MemoryUsage:F2}";
+                    writer.WriteLine(line);
+                }
+
+                // Calculate summaries
+                float avgFPS = performanceSamples.Average(s => s.FPS);
+                float minFPS = performanceSamples.Min(s => s.FPS);
+                float maxFPS = performanceSamples.Max(s => s.FPS);
+
+                float avgCPUTime = performanceSamples.Average(s => s.CPUTime);
+                float minCPUTime = performanceSamples.Min(s => s.CPUTime);
+                float maxCPUTime = performanceSamples.Max(s => s.CPUTime);
+
+                float avgGPUTime = performanceSamples.Average(s => s.GPUTime);
+                float minGPUTime = performanceSamples.Min(s => s.GPUTime);
+                float maxGPUTime = performanceSamples.Max(s => s.GPUTime);
+
+                float avgDrawCalls = performanceSamples.Average(s => s.DrawCalls);
+                float minDrawCalls = performanceSamples.Min(s => s.DrawCalls);
+                float maxDrawCalls = performanceSamples.Max(s => s.DrawCalls);
+
+                float avgMemoryUsage = performanceSamples.Average(s => s.MemoryUsage);
+                float minMemoryUsage = performanceSamples.Min(s => s.MemoryUsage);
+                float maxMemoryUsage = performanceSamples.Max(s => s.MemoryUsage);
+
+                // Write summary
+                writer.WriteLine(); // Empty line before summary
+                writer.WriteLine("Summary:");
+
+                writer.WriteLine($"Average FPS:,{avgFPS:F2}");
+                writer.WriteLine($"Minimum FPS:,{minFPS:F2}");
+                writer.WriteLine($"Maximum FPS:,{maxFPS:F2}");
+
+                writer.WriteLine($"Average CPU Time (ms):,{avgCPUTime:F2}");
+                writer.WriteLine($"Minimum CPU Time (ms):,{minCPUTime:F2}");
+                writer.WriteLine($"Maximum CPU Time (ms):,{maxCPUTime:F2}");
+
+                writer.WriteLine($"Average GPU Time (ms):,{avgGPUTime:F2}");
+                writer.WriteLine($"Minimum GPU Time (ms):,{minGPUTime:F2}");
+                writer.WriteLine($"Maximum GPU Time (ms):,{maxGPUTime:F2}");
+
+                writer.WriteLine($"Average Draw Calls:,{avgDrawCalls:F0}");
+                writer.WriteLine($"Minimum Draw Calls:,{minDrawCalls:F0}");
+                writer.WriteLine($"Maximum Draw Calls:,{maxDrawCalls:F0}");
+
+                writer.WriteLine($"Average Memory Usage (MB):,{avgMemoryUsage:F2}");
+                writer.WriteLine($"Minimum Memory Usage (MB):,{minMemoryUsage:F2}");
+                writer.WriteLine($"Maximum Memory Usage (MB):,{maxMemoryUsage:F2}");
+
+                writer.Flush();
+            }
+
+            performanceSamples.Clear();
+
+            Debug.Log($"Performance report generated at: {fullPath}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("Failed to write performance report: " + e.Message);
+        }
+    }
+
+    private class PerformanceSample
+    {
+        public DateTime Timestamp;
+        public float FPS;
+        public float CPUTime;
+        public float GPUTime;
+        public float DrawCalls;
+        public float MemoryUsage;
     }
 }
