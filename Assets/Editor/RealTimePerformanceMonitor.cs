@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
 using Unity.Profiling;
+using UnityEngine.Profiling;
 
 public class RealTimePerformanceMonitor : EditorWindow
 {
@@ -12,6 +13,7 @@ public class RealTimePerformanceMonitor : EditorWindow
     private List<float> fpsSamples = new List<float>();
     private List<float> cpuTimeSamples = new List<float>();
     private List<float> gpuTimeSamples = new List<float>();
+    private List<float> drawCallsSamples = new List<float>();
     private List<float> memoryUsageSamples = new List<float>();
 
     private float updateInterval = 0.5f;
@@ -19,6 +21,7 @@ public class RealTimePerformanceMonitor : EditorWindow
 
     private ProfilerRecorder cpuTimeRecorder;
     private ProfilerRecorder gpuTimeRecorder;
+    private ProfilerRecorder drawCallsRecorder;
 
     [MenuItem("Window/Real-Time Performance Monitor")]
     public static void ShowWindow()
@@ -32,21 +35,26 @@ public class RealTimePerformanceMonitor : EditorWindow
         fpsSamples.Clear();
         cpuTimeSamples.Clear();
         gpuTimeSamples.Clear();
+        drawCallsSamples.Clear();
         memoryUsageSamples.Clear();
 
         // Start the ProfilerRecorders
         cpuTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "Main Thread", maxSamples);
         gpuTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Gfx.WaitForPresentOnGfxThread", maxSamples);
+        drawCallsRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Draw Calls Count", maxSamples);
     }
 
     private void OnDisable()
     {
-        // Dispose of the ProfilerRecorders
+        // Dispose of the ProfilerRecorders if they're valid
         if (cpuTimeRecorder.Valid)
             cpuTimeRecorder.Dispose();
 
         if (gpuTimeRecorder.Valid)
             gpuTimeRecorder.Dispose();
+
+        if (drawCallsRecorder.Valid)
+            drawCallsRecorder.Dispose();
     }
 
     private void Update()
@@ -88,6 +96,18 @@ public class RealTimePerformanceMonitor : EditorWindow
                 }
                 TrimSamples(gpuTimeSamples);
 
+                // Collect Draw Calls data
+                if (drawCallsRecorder.Valid)
+                {
+                    float drawCalls = drawCallsRecorder.LastValue;
+                    drawCallsSamples.Add(drawCalls);
+                }
+                else
+                {
+                    drawCallsSamples.Add(0f);
+                }
+                TrimSamples(drawCallsSamples);
+
                 // Collect Memory Usage data
                 float memoryUsage = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / (1024f * 1024f);
                 memoryUsageSamples.Add(memoryUsage);
@@ -119,6 +139,12 @@ public class RealTimePerformanceMonitor : EditorWindow
             EditorGUILayout.BeginVertical("box");
             GUILayout.Label("GPU Time (ms): " + GetLatestSample(gpuTimeSamples));
             DrawGraph(gpuTimeSamples, 0, 50, Color.magenta);
+            EditorGUILayout.EndVertical();
+
+            // Draw Calls Graph
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Draw Calls: " + GetLatestSample(drawCallsSamples));
+            DrawGraph(drawCallsSamples, 0, 1000, Color.blue);
             EditorGUILayout.EndVertical();
 
             // Memory Usage Graph
