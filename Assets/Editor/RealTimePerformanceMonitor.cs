@@ -1,11 +1,10 @@
-using UnityEngine;
-using UnityEditor;
-using System.Collections.Generic;
-using Unity.Profiling;
-using UnityEngine.Profiling;
-using System.IO;
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Unity.Profiling;
+using UnityEditor;
+using UnityEngine;
 
 public class RealTimePerformanceMonitor : EditorWindow
 {
@@ -29,6 +28,16 @@ public class RealTimePerformanceMonitor : EditorWindow
     private ProfilerRecorder drawCallsRecorder;
 
     private Vector2 scrollPosition = Vector2.zero;
+
+    // Session management variables
+    private bool isSessionActive = false;
+    private string currentSessionName = "Session1";
+    private List<string> savedSessions = new List<string>();
+
+    // Comparison variables
+    private List<string> sessionsToCompare = new List<string>();
+    private Dictionary<string, List<PerformanceSample>> sessionData = new Dictionary<string, List<PerformanceSample>>();
+
 
     // Settings
     private bool showFPS = true;
@@ -91,6 +100,8 @@ public class RealTimePerformanceMonitor : EditorWindow
         // Load settings
         LoadSettings();
         LoadDebugSettings();
+
+        LoadSavedSessions();
     }
 
     private void OnDisable()
@@ -120,9 +131,11 @@ public class RealTimePerformanceMonitor : EditorWindow
             {
                 lastUpdateTime = EditorApplication.timeSinceStartup;
 
+                // Collect performance data
+                CollectPerformanceData();
+
                 var sample = new PerformanceSample
                 {
-                    Timestamp = DateTime.Now,
                     FPS = showFPS ? (1.0f / Time.deltaTime) : 0f,
                     CPUTime = showCPUTime && cpuTimeRecorder.Valid ? cpuTimeRecorder.LastValue * 1e-6f : 0f,
                     GPUTime = showGPUTime && gpuTimeRecorder.Valid ? gpuTimeRecorder.LastValue * 1e-5f : 0f,
@@ -214,6 +227,65 @@ public class RealTimePerformanceMonitor : EditorWindow
     private void OnGUI()
     {
         GUILayout.Label("Real-Time Performance Monitoring", EditorStyles.boldLabel);
+
+        // Session Management
+        GUILayout.Space(10);
+        GUILayout.Label("Session Management", EditorStyles.boldLabel);
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label("Session Name:", GUILayout.Width(90));
+        currentSessionName = GUILayout.TextField(currentSessionName);
+        if (!isSessionActive)
+        {
+            if (GUILayout.Button("Start Session"))
+            {
+                StartNewSession();
+            }
+        }
+        else
+        {
+            if (GUILayout.Button("End Session"))
+            {
+                EndCurrentSession();
+            }
+        }
+        EditorGUILayout.EndHorizontal();
+
+        // Comparison Tools
+        GUILayout.Space(10);
+        GUILayout.Label("Comparison Tools", EditorStyles.boldLabel);
+
+        if (savedSessions.Count > 0)
+        {
+            GUILayout.Label("Select Sessions to Compare:");
+
+            for (int i = 0; i < savedSessions.Count; i++)
+            {
+                string sessionName = savedSessions[i];
+                bool isSelected = sessionsToCompare.Contains(sessionName);
+                bool newSelection = EditorGUILayout.ToggleLeft(sessionName, isSelected);
+                if (newSelection != isSelected)
+                {
+                    if (newSelection)
+                        sessionsToCompare.Add(sessionName);
+                    else
+                        sessionsToCompare.Remove(sessionName);
+                }
+            }
+
+            if (sessionsToCompare.Count > 0)
+            {
+                if (GUILayout.Button("Load and Compare Sessions"))
+                {
+                    LoadAndCompareSessions();
+                }
+            }
+        }
+        else
+        {
+            GUILayout.Label("No saved sessions available.");
+        }
+
+        GUILayout.Space(10);
 
         // Settings Foldout
         showSettings = EditorGUILayout.Foldout(showSettings, "Settings");
@@ -325,54 +397,23 @@ public class RealTimePerformanceMonitor : EditorWindow
 
         // Use a scroll view in case the window is too small
         scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+
+        if (isSessionActive)
         {
-            if (showFPS)
-            {
-                // FPS Graph
-                EditorGUILayout.BeginVertical("box");
-                GUILayout.Label("Frame Rate (FPS): " + GetLatestSample(fpsSamples));
-                DrawGraph(fpsSamples, 0, maxFPSValue, Color.green);
-                EditorGUILayout.EndVertical();
-            }
-
-            if (showCPUTime)
-            {
-                // CPU Time Graph
-                EditorGUILayout.BeginVertical("box");
-                GUILayout.Label("CPU Time (ms): " + GetLatestSample(cpuTimeSamples));
-                DrawGraph(cpuTimeSamples, 0, maxCPUTimeValue, Color.yellow);
-                EditorGUILayout.EndVertical();
-            }
-
-            if (showGPUTime)
-            {
-                // GPU Time Graph
-                EditorGUILayout.BeginVertical("box");
-                GUILayout.Label("GPU Time (ms): " + GetLatestSample(gpuTimeSamples));
-                DrawGraph(gpuTimeSamples, 0, maxGPUTimeValue, Color.magenta);
-                EditorGUILayout.EndVertical();
-            }
-
-            if (showDrawCalls)
-            {
-                // Draw Calls Graph
-                EditorGUILayout.BeginVertical("box");
-                GUILayout.Label("Draw Calls: " + GetLatestSample(drawCallsSamples));
-                DrawGraph(drawCallsSamples, 0, maxDrawCallsValue, Color.blue);
-                EditorGUILayout.EndVertical();
-            }
-
-            if (showMemoryUsage)
-            {
-                // Memory Usage Graph
-                EditorGUILayout.BeginVertical("box");
-                GUILayout.Label("Memory Usage (MB): " + GetLatestSample(memoryUsageSamples));
-                DrawGraph(memoryUsageSamples, 0, maxMemoryUsageValue, Color.cyan);
-                EditorGUILayout.EndVertical();
-            }
-
-            EditorGUILayout.EndScrollView();
+            // Live monitoring graphs
+            DrawLiveMonitoringGraphs();
         }
+        else if (sessionData.Count > 0)
+        {
+            // Comparison graphs
+            DrawComparisonGraphs();
+        }
+        else
+        {
+            GUILayout.Label("No data to display. Start a session to begin monitoring.");
+        }
+
+        EditorGUILayout.EndScrollView();
     }
 
     private string GetLatestSample(List<float> samples)
@@ -660,13 +701,319 @@ public class RealTimePerformanceMonitor : EditorWindow
         }
     }
 
+    private void CollectPerformanceData()
+    {
+        var sample = new PerformanceSample
+        {
+            FPS = showFPS ? (1.0f / Time.deltaTime) : 0f,
+            CPUTime = showCPUTime && cpuTimeRecorder.Valid ? cpuTimeRecorder.LastValue * 1e-6f : 0f,
+            GPUTime = showGPUTime && gpuTimeRecorder.Valid ? gpuTimeRecorder.LastValue * 1e-5f : 0f,
+            DrawCalls = showDrawCalls && drawCallsRecorder.Valid ? drawCallsRecorder.LastValue : 0f,
+            MemoryUsage = showMemoryUsage ? UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / (1024f * 1024f) : 0f
+        };
+
+        performanceSamples.Add(sample);
+
+        // Trim samples if necessary to limit memory usage
+        if (performanceSamples.Count > maxSamples)
+        {
+            performanceSamples.RemoveAt(0);
+        }
+    }
+
+    private void StartNewSession()
+    {
+        isSessionActive = true;
+        performanceSamples.Clear();
+        Debug.Log($"Started new session: {currentSessionName}");
+    }
+
+    private void EndCurrentSession()
+    {
+        isSessionActive = false;
+        SaveSessionData();
+        LoadSavedSessions(); // Refresh the list of saved sessions
+        performanceSamples.Clear();
+        Debug.Log($"Ended session: {currentSessionName}");
+    }
+
+    private void SaveSessionData()
+    {
+        string sessionFolder = Path.Combine(Application.dataPath, "PerformanceSessions");
+        if (!Directory.Exists(sessionFolder))
+        {
+            Directory.CreateDirectory(sessionFolder);
+        }
+
+        string sessionFile = Path.Combine(sessionFolder, currentSessionName + ".json");
+        try
+        {
+            if (performanceSamples.Count == 0)
+            {
+                Debug.LogWarning("No performance data to save for this session.");
+                return;
+            }
+
+            // Create an instance of PerformanceSessionData with the collected samples
+            PerformanceSessionData sessionData = new PerformanceSessionData(performanceSamples);
+
+            // Serialize the session data to JSON
+            string jsonData = JsonUtility.ToJson(sessionData, true);
+
+            // Write the JSON data to the file
+            File.WriteAllText(sessionFile, jsonData);
+            Debug.Log($"Session data saved: {sessionFile}");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("Failed to save session data: " + e.Message);
+        }
+    }
+
+    private void LoadSavedSessions()
+    {
+        savedSessions.Clear();
+        string sessionFolder = Path.Combine(Application.dataPath, "PerformanceSessions");
+        if (Directory.Exists(sessionFolder))
+        {
+            string[] files = Directory.GetFiles(sessionFolder, "*.json");
+            foreach (string file in files)
+            {
+                string sessionName = Path.GetFileNameWithoutExtension(file);
+                savedSessions.Add(sessionName);
+            }
+        }
+    }
+
+    private void LoadAndCompareSessions()
+    {
+        sessionData.Clear();
+        string sessionFolder = Path.Combine(Application.dataPath, "PerformanceSessions");
+        foreach (string sessionName in sessionsToCompare)
+        {
+            string sessionFile = Path.Combine(sessionFolder, sessionName + ".json");
+            if (File.Exists(sessionFile))
+            {
+                try
+                {
+                    string jsonData = File.ReadAllText(sessionFile);
+                    PerformanceSessionData session = JsonUtility.FromJson<PerformanceSessionData>(jsonData);
+                    sessionData[sessionName] = session.Samples;
+                    Debug.Log($"Loaded session data: {sessionName}");
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Failed to load session data for {sessionName}: {e.Message}");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"Session file not found: {sessionFile}");
+            }
+        }
+    }
+
+    private void DrawLiveMonitoringGraphs()
+    {
+        // FPS Graph
+        if (showFPS)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Frame Rate (FPS): " + GetLatestSample(performanceSamples.Select(s => s.FPS).ToList()));
+            DrawGraph(performanceSamples.Select(s => s.FPS).ToList(), 0, maxFPSValue, Color.green);
+            EditorGUILayout.EndVertical();
+        }
+
+        // CPU Time Graph
+        if (showCPUTime)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("CPU Time (ms): " + GetLatestSample(performanceSamples.Select(s => s.CPUTime).ToList()));
+            DrawGraph(performanceSamples.Select(s => s.CPUTime).ToList(), 0, maxCPUTimeValue, Color.yellow);
+            EditorGUILayout.EndVertical();
+        }
+
+        // GPU Time Graph
+        if (showGPUTime)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("GPU Time (ms): " + GetLatestSample(performanceSamples.Select(s => s.GPUTime).ToList()));
+            DrawGraph(performanceSamples.Select(s => s.GPUTime).ToList(), 0, maxGPUTimeValue, Color.magenta);
+            EditorGUILayout.EndVertical();
+        }
+
+        // Draw Calls Graph
+        if (showDrawCalls)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Draw Calls: " + GetLatestSample(performanceSamples.Select(s => s.DrawCalls).ToList()));
+            DrawGraph(performanceSamples.Select(s => s.DrawCalls).ToList(), 0, maxDrawCallsValue, Color.blue);
+            EditorGUILayout.EndVertical();
+        }
+
+        // Memory Usage Graph
+        if (showMemoryUsage)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Memory Usage (MB): " + GetLatestSample(performanceSamples.Select(s => s.MemoryUsage).ToList()));
+            DrawGraph(performanceSamples.Select(s => s.MemoryUsage).ToList(), 0, maxMemoryUsageValue, Color.cyan);
+            EditorGUILayout.EndVertical();
+        }
+    }
+
+    private void DrawComparisonGraphs()
+    {
+        // FPS Comparison Graph
+        if (showFPS)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Frame Rate (FPS) Comparison");
+            DrawComparisonGraph("FPS", maxFPSValue);
+            EditorGUILayout.EndVertical();
+        }
+
+        // CPU Time Comparison Graph
+        if (showCPUTime)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("CPU Time (ms) Comparison");
+            DrawComparisonGraph("CPUTime", maxCPUTimeValue);
+            EditorGUILayout.EndVertical();
+        }
+
+        // GPU Time Comparison Graph
+        if (showGPUTime)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("GPU Time (ms) Comparison");
+            DrawComparisonGraph("GPUTime", maxGPUTimeValue);
+            EditorGUILayout.EndVertical();
+        }
+
+        // Draw Calls Comparison Graph
+        if (showDrawCalls)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Draw Calls Comparison");
+            DrawComparisonGraph("DrawCalls", maxDrawCallsValue);
+            EditorGUILayout.EndVertical();
+        }
+
+        // Memory Usage Comparison Graph
+        if (showMemoryUsage)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Memory Usage (MB) Comparison");
+            DrawComparisonGraph("MemoryUsage", maxMemoryUsageValue);
+            EditorGUILayout.EndVertical();
+        }
+    }
+
+    private void DrawComparisonGraph(string metricName, float maxValue)
+    {
+        Rect rect = GUILayoutUtility.GetRect(graphWidth, graphHeight);
+
+        // Draw background
+        EditorGUI.DrawRect(rect, new Color(0.2f, 0.2f, 0.2f));
+
+        // Draw grid lines
+        Handles.BeginGUI();
+        Color originalColor = Handles.color;
+        Handles.color = new Color(0.4f, 0.4f, 0.4f);
+        for (int i = 0; i <= 10; i++)
+        {
+            float y = rect.y + (i / 10.0f) * rect.height;
+            Handles.DrawLine(new Vector2(rect.x, y), new Vector2(rect.x + rect.width, y));
+        }
+        Handles.color = originalColor;
+
+        // Draw graphs for each session
+        int sessionIndex = 0;
+        foreach (var sessionEntry in sessionData)
+        {
+            string sessionName = sessionEntry.Key;
+            List<PerformanceSample> samples = sessionEntry.Value;
+
+            List<float> metricValues = new List<float>();
+            switch (metricName)
+            {
+                case "FPS":
+                    metricValues = samples.Select(s => s.FPS).ToList();
+                    break;
+                case "CPUTime":
+                    metricValues = samples.Select(s => s.CPUTime).ToList();
+                    break;
+                case "GPUTime":
+                    metricValues = samples.Select(s => s.GPUTime).ToList();
+                    break;
+                case "DrawCalls":
+                    metricValues = samples.Select(s => s.DrawCalls).ToList();
+                    break;
+                case "MemoryUsage":
+                    metricValues = samples.Select(s => s.MemoryUsage).ToList();
+                    break;
+            }
+
+            // Adjust color for each session
+            Color sessionColor = GetSessionColor(sessionIndex);
+
+            if (metricValues.Count > 1)
+            {
+                Vector3[] points = new Vector3[metricValues.Count];
+                for (int i = 0; i < metricValues.Count; i++)
+                {
+                    float sample = Mathf.Clamp(metricValues[i], 0, maxValue);
+                    float x = rect.x + (i / (float)(metricValues.Count - 1)) * rect.width;
+                    float y = rect.y + rect.height - ((sample) / (maxValue)) * rect.height;
+                    points[i] = new Vector3(x, y, 0);
+                }
+
+                Handles.color = sessionColor;
+                Handles.DrawAAPolyLine(2f, points);
+                Handles.color = originalColor;
+            }
+
+            // Display session name with color
+            Rect legendRect = new Rect(rect.x + rect.width + 10, rect.y + sessionIndex * 20, 150, 20);
+            EditorGUI.LabelField(legendRect, sessionName, new GUIStyle() { normal = new GUIStyleState() { textColor = sessionColor } });
+
+            sessionIndex++;
+        }
+
+        Handles.EndGUI();
+    }
+
+    private Color GetSessionColor(int index)
+    {
+        Color[] colors = { Color.green, Color.red, Color.blue, Color.yellow, Color.magenta, Color.cyan };
+        return colors[index % colors.Length];
+    }
+
+    [System.Serializable]
     private class PerformanceSample
     {
-        public DateTime Timestamp;
+        public string Timestamp; // Store as string
+
         public float FPS;
         public float CPUTime;
         public float GPUTime;
         public float DrawCalls;
         public float MemoryUsage;
+
+        public PerformanceSample()
+        {
+            Timestamp = System.DateTime.Now.ToString("o"); // ISO 8601 format
+        }
+    }
+
+    [System.Serializable]
+    private class PerformanceSessionData
+    {
+        public List<PerformanceSample> Samples;
+
+        public PerformanceSessionData(List<PerformanceSample> samples)
+        {
+            Samples = samples;
+        }
     }
 }
