@@ -27,6 +27,7 @@ public class RealTimePerformanceMonitor : EditorWindow
     private ProfilerRecorder gpuTimeRecorder;
     private ProfilerRecorder drawCallsRecorder;
 
+    private Vector2 settingsScrollPosition = Vector2.zero;
     private Vector2 scrollPosition = Vector2.zero;
 
     // Session management variables
@@ -231,36 +232,37 @@ public class RealTimePerformanceMonitor : EditorWindow
         // Session Management
         GUILayout.Space(10);
         GUILayout.Label("Session Management", EditorStyles.boldLabel);
+        EditorGUILayout.BeginVertical("box");
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("Session Name:", GUILayout.Width(90));
         currentSessionName = GUILayout.TextField(currentSessionName);
         if (!isSessionActive)
         {
-            if (GUILayout.Button("Start Session"))
+            if (GUILayout.Button("Start Session", GUILayout.Width(100)))
             {
                 StartNewSession();
             }
         }
         else
         {
-            if (GUILayout.Button("End Session"))
+            if (GUILayout.Button("End Session", GUILayout.Width(100)))
             {
                 EndCurrentSession();
             }
         }
         EditorGUILayout.EndHorizontal();
+        EditorGUILayout.EndVertical();
 
         // Comparison Tools
         GUILayout.Space(10);
         GUILayout.Label("Comparison Tools", EditorStyles.boldLabel);
-
+        EditorGUILayout.BeginVertical("box");
         if (savedSessions.Count > 0)
         {
             GUILayout.Label("Select Sessions to Compare:");
-
-            for (int i = 0; i < savedSessions.Count; i++)
+            EditorGUILayout.BeginVertical("box");
+            foreach (string sessionName in savedSessions)
             {
-                string sessionName = savedSessions[i];
                 bool isSelected = sessionsToCompare.Contains(sessionName);
                 bool newSelection = EditorGUILayout.ToggleLeft(sessionName, isSelected);
                 if (newSelection != isSelected)
@@ -271,6 +273,7 @@ public class RealTimePerformanceMonitor : EditorWindow
                         sessionsToCompare.Remove(sessionName);
                 }
             }
+            EditorGUILayout.EndVertical();
 
             if (sessionsToCompare.Count > 0)
             {
@@ -284,18 +287,29 @@ public class RealTimePerformanceMonitor : EditorWindow
         {
             GUILayout.Label("No saved sessions available.");
         }
+        EditorGUILayout.EndVertical();
 
         GUILayout.Space(10);
 
         // Settings Foldout
-        showSettings = EditorGUILayout.Foldout(showSettings, "Settings");
+        showSettings = EditorGUILayout.Foldout(showSettings, "Settings", true, EditorStyles.foldoutHeader);
         if (showSettings)
         {
+            settingsScrollPosition = EditorGUILayout.BeginScrollView(settingsScrollPosition);
             EditorGUI.indentLevel++;
+            GUILayout.Space(5);
+
+            // Update Interval
+            EditorGUILayout.LabelField("General Settings", EditorStyles.boldLabel);
             updateInterval = EditorGUILayout.Slider("Update Interval (s)", updateInterval, 0.1f, 5f);
 
+            // Metrics Settings
+            GUILayout.Space(5);
+            EditorGUILayout.LabelField("Metrics Display Settings", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginVertical("box");
             // FPS Settings
-            showFPS = EditorGUILayout.Toggle("Show FPS", showFPS);
+            showFPS = EditorGUILayout.ToggleLeft("Show FPS", showFPS);
             if (showFPS)
             {
                 EditorGUI.indentLevel++;
@@ -304,7 +318,7 @@ public class RealTimePerformanceMonitor : EditorWindow
             }
 
             // CPU Time Settings
-            showCPUTime = EditorGUILayout.Toggle("Show CPU Time", showCPUTime);
+            showCPUTime = EditorGUILayout.ToggleLeft("Show CPU Time", showCPUTime);
             if (showCPUTime)
             {
                 EditorGUI.indentLevel++;
@@ -313,7 +327,7 @@ public class RealTimePerformanceMonitor : EditorWindow
             }
 
             // GPU Time Settings
-            showGPUTime = EditorGUILayout.Toggle("Show GPU Time", showGPUTime);
+            showGPUTime = EditorGUILayout.ToggleLeft("Show GPU Time", showGPUTime);
             if (showGPUTime)
             {
                 EditorGUI.indentLevel++;
@@ -322,7 +336,7 @@ public class RealTimePerformanceMonitor : EditorWindow
             }
 
             // Draw Calls Settings
-            showDrawCalls = EditorGUILayout.Toggle("Show Draw Calls", showDrawCalls);
+            showDrawCalls = EditorGUILayout.ToggleLeft("Show Draw Calls", showDrawCalls);
             if (showDrawCalls)
             {
                 EditorGUI.indentLevel++;
@@ -331,16 +345,21 @@ public class RealTimePerformanceMonitor : EditorWindow
             }
 
             // Memory Usage Settings
-            showMemoryUsage = EditorGUILayout.Toggle("Show Memory Usage", showMemoryUsage);
+            showMemoryUsage = EditorGUILayout.ToggleLeft("Show Memory Usage", showMemoryUsage);
             if (showMemoryUsage)
             {
                 EditorGUI.indentLevel++;
                 maxMemoryUsageValue = EditorGUILayout.FloatField("Max Memory Usage (MB)", maxMemoryUsageValue);
                 EditorGUI.indentLevel--;
             }
+            EditorGUILayout.EndVertical();
 
             // Threshold Settings
-            enableThresholds = EditorGUILayout.Toggle("Enable Threshold Alerts", enableThresholds);
+            GUILayout.Space(5);
+            EditorGUILayout.LabelField("Threshold Alerts Settings", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginVertical("box");
+            enableThresholds = EditorGUILayout.ToggleLeft("Enable Threshold Alerts", enableThresholds);
             if (enableThresholds)
             {
                 EditorGUI.indentLevel++;
@@ -356,41 +375,57 @@ public class RealTimePerformanceMonitor : EditorWindow
                     memoryUsageThreshold = EditorGUILayout.FloatField("Memory Usage Threshold (MB)", memoryUsageThreshold);
                 EditorGUI.indentLevel--;
             }
+            EditorGUILayout.EndVertical();
 
             // Logging Settings
-            enableLogging = EditorGUILayout.Toggle("Enable Logging", enableLogging);
+            GUILayout.Space(5);
+            EditorGUILayout.LabelField("Logging Settings", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginVertical("box");
+            enableLogging = EditorGUILayout.ToggleLeft("Enable Logging", enableLogging);
             if (enableLogging)
             {
                 EditorGUI.indentLevel++;
-                logToConsole = EditorGUILayout.Toggle("Log to Console", logToConsole);
-                logToFile = EditorGUILayout.Toggle("Log to File", logToFile);
+                logToConsole = EditorGUILayout.ToggleLeft("Log to Console", logToConsole);
+                logToFile = EditorGUILayout.ToggleLeft("Log to File", logToFile);
                 if (logToFile)
                 {
+                    EditorGUI.indentLevel++;
                     logFilePath = EditorGUILayout.TextField("Log File Path", logFilePath);
+                    EditorGUI.indentLevel--;
                 }
                 EditorGUI.indentLevel--;
             }
+            EditorGUILayout.EndVertical();
 
-            // Reporting Settings
-            enableReportGeneration = EditorGUILayout.Toggle("Enable Report Generation", enableReportGeneration);
+            // Report Generation Settings
+            GUILayout.Space(5);
+            EditorGUILayout.LabelField("Report Generation Settings", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginVertical("box");
+            enableReportGeneration = EditorGUILayout.ToggleLeft("Enable Report Generation", enableReportGeneration);
             if (enableReportGeneration)
             {
                 EditorGUI.indentLevel++;
                 reportInterval = EditorGUILayout.FloatField("Report Interval (s)", reportInterval);
                 reportFilePath = EditorGUILayout.TextField("Report File Path", reportFilePath);
+                if (GUILayout.Button("Generate Performance Report Now"))
+                {
+                    GeneratePerformanceReport();
+                }
                 EditorGUI.indentLevel--;
             }
-
-            if (GUILayout.Button("Generate Performance Report Now"))
-            {
-                GeneratePerformanceReport();
-            }
+            EditorGUILayout.EndVertical();
 
             // Profiler Integration
+            GUILayout.Space(5);
             if (GUILayout.Button("Open Unity Profiler"))
             {
                 EditorApplication.ExecuteMenuItem("Window/Analysis/Profiler");
             }
+
+            EditorGUI.indentLevel--;
+            EditorGUILayout.EndScrollView();
         }
 
         EditorGUILayout.Space();
@@ -415,6 +450,7 @@ public class RealTimePerformanceMonitor : EditorWindow
 
         EditorGUILayout.EndScrollView();
     }
+
 
     private string GetLatestSample(List<float> samples)
     {
