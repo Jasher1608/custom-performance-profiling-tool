@@ -23,6 +23,26 @@ public class RealTimePerformanceMonitor : EditorWindow
     private ProfilerRecorder gpuTimeRecorder;
     private ProfilerRecorder drawCallsRecorder;
 
+    private Vector2 scrollPosition = Vector2.zero;
+
+    // Settings
+    private bool showFPS = true;
+    private float maxFPSValue = 500f;
+
+    private bool showCPUTime = true;
+    private float maxCPUTimeValue = 50f;
+
+    private bool showGPUTime = true;
+    private float maxGPUTimeValue = 50f;
+
+    private bool showDrawCalls = true;
+    private float maxDrawCallsValue = 1000f;
+
+    private bool showMemoryUsage = true;
+    private float maxMemoryUsageValue = 1024;
+
+    private bool showSettings = false;
+
     [MenuItem("Window/Real-Time Performance Monitor")]
     public static void ShowWindow()
     {
@@ -42,6 +62,9 @@ public class RealTimePerformanceMonitor : EditorWindow
         cpuTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "Main Thread", maxSamples);
         gpuTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Gfx.WaitForPresentOnGfxThread", maxSamples);
         drawCallsRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Draw Calls Count", maxSamples);
+
+        // Load settings
+        LoadSettings();
     }
 
     private void OnDisable()
@@ -55,6 +78,9 @@ public class RealTimePerformanceMonitor : EditorWindow
 
         if (drawCallsRecorder.Valid)
             drawCallsRecorder.Dispose();
+
+        // Save settings
+        SaveSettings();
     }
 
     private void Update()
@@ -68,50 +94,65 @@ public class RealTimePerformanceMonitor : EditorWindow
                 lastUpdateTime = EditorApplication.timeSinceStartup;
 
                 // Collect FPS data
-                float fps = 1.0f / Time.deltaTime;
-                fpsSamples.Add(fps);
-                TrimSamples(fpsSamples);
+                if (showFPS)
+                {
+                    float fps = 1.0f / Time.deltaTime;
+                    fpsSamples.Add(fps);
+                    TrimSamples(fpsSamples);
+                }
 
                 // Collect CPU Time data
-                if (cpuTimeRecorder.Valid)
+                if (showCPUTime)
                 {
-                    float cpuTime = cpuTimeRecorder.LastValue * (1e-6f); // Convert from nanoseconds to milliseconds
-                    cpuTimeSamples.Add(cpuTime);
+                    if (cpuTimeRecorder.Valid)
+                    {
+                        float cpuTime = cpuTimeRecorder.LastValue * (1e-6f); // Convert from nanoseconds to milliseconds
+                        cpuTimeSamples.Add(cpuTime);
+                    }
+                    else
+                    {
+                        cpuTimeSamples.Add(0f);
+                    }
+                    TrimSamples(cpuTimeSamples);
                 }
-                else
-                {
-                    cpuTimeSamples.Add(0f);
-                }
-                TrimSamples(cpuTimeSamples);
 
                 // Collect GPU Time data
-                if (gpuTimeRecorder.Valid)
+                if (showGPUTime)
                 {
-                    float gpuTime = gpuTimeRecorder.LastValue * (1e-5f);
-                    gpuTimeSamples.Add(gpuTime);
+                    if (gpuTimeRecorder.Valid)
+                    {
+                        float gpuTime = gpuTimeRecorder.LastValue * (1e-5f);
+                        gpuTimeSamples.Add(gpuTime);
+                    }
+                    else
+                    {
+                        gpuTimeSamples.Add(0f);
+                    }
+                    TrimSamples(gpuTimeSamples);
                 }
-                else
-                {
-                    gpuTimeSamples.Add(0f);
-                }
-                TrimSamples(gpuTimeSamples);
 
                 // Collect Draw Calls data
-                if (drawCallsRecorder.Valid)
+                if (showDrawCalls)
                 {
-                    float drawCalls = drawCallsRecorder.LastValue;
-                    drawCallsSamples.Add(drawCalls);
+                    if (drawCallsRecorder.Valid)
+                    {
+                        float drawCalls = drawCallsRecorder.LastValue;
+                        drawCallsSamples.Add(drawCalls);
+                    }
+                    else
+                    {
+                        drawCallsSamples.Add(0f);
+                    }
+                    TrimSamples(drawCallsSamples);
                 }
-                else
-                {
-                    drawCallsSamples.Add(0f);
-                }
-                TrimSamples(drawCallsSamples);
 
                 // Collect Memory Usage data
-                float memoryUsage = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / (1024f * 1024f);
-                memoryUsageSamples.Add(memoryUsage);
-                TrimSamples(memoryUsageSamples);
+                if (showMemoryUsage)
+                {
+                    float memoryUsage = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / (1024f * 1024f);
+                    memoryUsageSamples.Add(memoryUsage);
+                    TrimSamples(memoryUsageSamples);
+                }
             }
         }
     }
@@ -120,38 +161,112 @@ public class RealTimePerformanceMonitor : EditorWindow
     {
         GUILayout.Label("Real-Time Performance Monitoring", EditorStyles.boldLabel);
 
-        // Use a scroll view in case the window is too small
-        using (var scrollView = new EditorGUILayout.ScrollViewScope(Vector2.zero))
+        // Settings Foldout
+        showSettings = EditorGUILayout.Foldout(showSettings, "Settings");
+        if (showSettings)
         {
-            // FPS Graph
-            EditorGUILayout.BeginVertical("box");
-            GUILayout.Label("Frame Rate (FPS): " + GetLatestSample(fpsSamples));
-            DrawGraph(fpsSamples, 0, 500, Color.green);
-            EditorGUILayout.EndVertical();
+            EditorGUI.indentLevel++;
+            updateInterval = EditorGUILayout.Slider("Update Interval (s)", updateInterval, 0.1f, 5f);
 
-            // CPU Time Graph
-            EditorGUILayout.BeginVertical("box");
-            GUILayout.Label("CPU Time (ms): " + GetLatestSample(cpuTimeSamples));
-            DrawGraph(cpuTimeSamples, 0, 50, Color.yellow);
-            EditorGUILayout.EndVertical();
+            // FPS Settings
+            showFPS = EditorGUILayout.Toggle("Show FPS", showFPS);
+            if (showFPS)
+            {
+                EditorGUI.indentLevel++;
+                maxFPSValue = EditorGUILayout.FloatField("Max FPS Value", maxFPSValue);
+                EditorGUI.indentLevel--;
+            }
 
-            // GPU Time Graph
-            EditorGUILayout.BeginVertical("box");
-            GUILayout.Label("GPU Time (ms): " + GetLatestSample(gpuTimeSamples));
-            DrawGraph(gpuTimeSamples, 0, 50, Color.magenta);
-            EditorGUILayout.EndVertical();
+            // CPU Time Settings
+            showCPUTime = EditorGUILayout.Toggle("Show CPU Time", showCPUTime);
+            if (showCPUTime)
+            {
+                EditorGUI.indentLevel++;
+                maxCPUTimeValue = EditorGUILayout.FloatField("Max CPU Time (ms)", maxCPUTimeValue);
+                EditorGUI.indentLevel--;
+            }
 
-            // Draw Calls Graph
-            EditorGUILayout.BeginVertical("box");
-            GUILayout.Label("Draw Calls: " + GetLatestSample(drawCallsSamples));
-            DrawGraph(drawCallsSamples, 0, 1000, Color.blue);
-            EditorGUILayout.EndVertical();
+            // GPU Time Settings
+            showGPUTime = EditorGUILayout.Toggle("Show GPU Time", showGPUTime);
+            if (showGPUTime)
+            {
+                EditorGUI.indentLevel++;
+                maxGPUTimeValue = EditorGUILayout.FloatField("Max GPU Time (ms)", maxGPUTimeValue);
+                EditorGUI.indentLevel--;
+            }
 
-            // Memory Usage Graph
-            EditorGUILayout.BeginVertical("box");
-            GUILayout.Label("Memory Usage (MB): " + GetLatestSample(memoryUsageSamples));
-            DrawGraph(memoryUsageSamples, 0, 1024, Color.cyan);
-            EditorGUILayout.EndVertical();
+            // Draw Calls Settings
+            showDrawCalls = EditorGUILayout.Toggle("Show Draw Calls", showDrawCalls);
+            if (showDrawCalls)
+            {
+                EditorGUI.indentLevel++;
+                maxDrawCallsValue = EditorGUILayout.FloatField("Max Draw Calls", maxDrawCallsValue);
+                EditorGUI.indentLevel--;
+            }
+
+            // Memory Usage Settings
+            showMemoryUsage = EditorGUILayout.Toggle("Show Memory Usage", showMemoryUsage);
+            if (showMemoryUsage)
+            {
+                EditorGUI.indentLevel++;
+                maxMemoryUsageValue = EditorGUILayout.FloatField("Max Memory Usage (MB)", maxMemoryUsageValue);
+                EditorGUI.indentLevel--;
+            }
+
+            EditorGUI.indentLevel--;
+        }
+
+        EditorGUILayout.Space();
+
+        // Use a scroll view in case the window is too small
+        scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+        {
+            if (showFPS)
+            {
+                // FPS Graph
+                EditorGUILayout.BeginVertical("box");
+                GUILayout.Label("Frame Rate (FPS): " + GetLatestSample(fpsSamples));
+                DrawGraph(fpsSamples, 0, maxFPSValue, Color.green);
+                EditorGUILayout.EndVertical();
+            }
+
+            if (showCPUTime)
+            {
+                // CPU Time Graph
+                EditorGUILayout.BeginVertical("box");
+                GUILayout.Label("CPU Time (ms): " + GetLatestSample(cpuTimeSamples));
+                DrawGraph(cpuTimeSamples, 0, maxCPUTimeValue, Color.yellow);
+                EditorGUILayout.EndVertical();
+            }
+
+            if (showGPUTime)
+            {
+                // GPU Time Graph
+                EditorGUILayout.BeginVertical("box");
+                GUILayout.Label("GPU Time (ms): " + GetLatestSample(gpuTimeSamples));
+                DrawGraph(gpuTimeSamples, 0, maxGPUTimeValue, Color.magenta);
+                EditorGUILayout.EndVertical();
+            }
+
+            if (showDrawCalls)
+            {
+                // Draw Calls Graph
+                EditorGUILayout.BeginVertical("box");
+                GUILayout.Label("Draw Calls: " + GetLatestSample(drawCallsSamples));
+                DrawGraph(drawCallsSamples, 0, maxDrawCallsValue, Color.blue);
+                EditorGUILayout.EndVertical();
+            }
+
+            if (showMemoryUsage)
+            {
+                // Memory Usage Graph
+                EditorGUILayout.BeginVertical("box");
+                GUILayout.Label("Memory Usage (MB): " + GetLatestSample(memoryUsageSamples));
+                DrawGraph(memoryUsageSamples, 0, maxMemoryUsageValue, Color.cyan);
+                EditorGUILayout.EndVertical();
+            }
+
+            EditorGUILayout.EndScrollView();
         }
     }
 
@@ -205,5 +320,45 @@ public class RealTimePerformanceMonitor : EditorWindow
         {
             samples.RemoveAt(0);
         }
+    }
+
+    private void SaveSettings()
+    {
+        EditorPrefs.SetBool("RTPM_ShowFPS", showFPS);
+        EditorPrefs.SetFloat("RTPM_MaxFPSValue", maxFPSValue);
+
+        EditorPrefs.SetBool("RTPM_ShowCPUTime", showCPUTime);
+        EditorPrefs.SetFloat("RTPM_MaxCPUTimeValue", maxCPUTimeValue);
+
+        EditorPrefs.SetBool("RTPM_ShowGPUTime", showGPUTime);
+        EditorPrefs.SetFloat("RTPM_MaxGPUTimeValue", maxGPUTimeValue);
+
+        EditorPrefs.SetBool("RTPM_ShowDrawCalls", showDrawCalls);
+        EditorPrefs.SetFloat("RTPM_MaxDrawCallsValue", maxDrawCallsValue);
+
+        EditorPrefs.SetBool("RTPM_ShowMemoryUsage", showMemoryUsage);
+        EditorPrefs.SetFloat("RTPM_MaxMemoryUsageValue", maxMemoryUsageValue);
+
+        EditorPrefs.SetFloat("RTPM_UpdateInterval", updateInterval);
+    }
+
+    private void LoadSettings()
+    {
+        showFPS = EditorPrefs.GetBool("RTPM_ShowFPS", true);
+        maxFPSValue = EditorPrefs.GetFloat("RTPM_MaxFPSValue", 500f);
+
+        showCPUTime = EditorPrefs.GetBool("RTPM_ShowCPUTime", true);
+        maxCPUTimeValue = EditorPrefs.GetFloat("RTPM_MaxCPUTimeValue", 50f);
+
+        showGPUTime = EditorPrefs.GetBool("RTPM_ShowGPUTime", true);
+        maxGPUTimeValue = EditorPrefs.GetFloat("RTPM_MaxGPUTimeValue", 50f);
+
+        showDrawCalls = EditorPrefs.GetBool("RTPM_ShowDrawCalls", true);
+        maxDrawCallsValue = EditorPrefs.GetFloat("RTPM_MaxDrawCallsValue", 1000f);
+
+        showMemoryUsage = EditorPrefs.GetBool("RTPM_ShowMemoryUsage", true);
+        maxMemoryUsageValue = EditorPrefs.GetFloat("RTPM_MaxMemoryUsageValue", 500f);
+
+        updateInterval = EditorPrefs.GetFloat("RTPM_UpdateInterval", 0.5f);
     }
 }
